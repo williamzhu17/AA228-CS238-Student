@@ -123,12 +123,30 @@ def update_local_score(graph, i, data, r, local_scores, j=None):
 
     return delta
 
-def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10):
+def randomize_graph(graph, p=0.1):
+    """Initialize random DAG"""
+    _score_cache.clear()
+    graph.remove_edges_from(list(graph.edges()))
+
+    n = graph.number_of_nodes()
+    order = np.random.permutation(n)
+
+    for a in range(n):
+        for b in range(a + 1, n):
+            child = int(order[b])
+
+            if np.random.random() < p:
+                graph.add_edge(int(order[a]), child)
+
+    return graph
+
+def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50):
     """
     Explore graphs
     Explore all possible valid moves and choose the one with the best delta
     Have tabu list to escape local max
     Have aspiration to allow a tabu move if it beats global max
+    Restart after patience with no improvement
     """
     best_score = sum(local_scores)
     global_best_score = best_score
@@ -137,8 +155,21 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10):
     n = len(nodes)
     t0 = time.perf_counter()
 
-    j_cache = [np.zeros(data.shape[0], dtype=int) for _ in range(n)]
+    # Initialize j_cache
+    j_cache = []
+    for i in range(n):
+        parents = list(graph.predecessors(i))
+        if parents:
+            j_cache.append(
+                np.ravel_multi_index(
+                    data[:, parents].T, tuple(int(r[p]) for p in parents)
+                )
+            )
+        else:
+            j_cache.append(np.zeros(data.shape[0], dtype=int))
+
     tabu = deque(maxlen=tabu_tenure)
+    stale = 0
 
     trial = 0
     while trial < trials:
@@ -263,6 +294,17 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10):
         if best_score > global_best_score:
             global_best_score = best_score
             global_best_edges = list(graph.edges())
+            stale = 0
+        else:
+            stale += 1
+
+            if stale >= patience:
+                print(
+                    f"Score saturated at step {trial} "
+                    f"(no improvement for {patience} steps), "
+                    f"best_score={global_best_score}"
+                )
+                break
 
         trial += 1
         if trial % 10 == 0:
@@ -273,7 +315,7 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10):
     graph.remove_edges_from(list(graph.edges()))
     graph.add_edges_from(global_best_edges)
 
-    return graph, global_best_score
+    return graph, global_best_score, trial
 
 def explore(infile, outfile, trials=10000):
     data, r, idx2names, names2idx = process_csv(infile)
@@ -282,14 +324,40 @@ def explore(infile, outfile, trials=10000):
     G = networkx.DiGraph()
     G.add_nodes_from(range(data.shape[1]))
 
-    local_scores = [local_score(i, [], data, r) for i in G.nodes()]
-    initial_score = sum(local_scores)
-    print("Initial score:", initial_score)
+    global_best_score = -np.inf
+    global_best_edges = []
+    trials_used = 0
+    restart = 0
 
-    G, score = explore_loop(G, data, r, local_scores, trials=trials)
+    while trials_used < trials:
+        if restart == 0:
+            _score_cache.clear()
+            G.remove_edges_from(list(G.edges()))
+            print("Starting with empty graph")
+        else:
+            print(f"Restarting with random graph (restart {restart})")
+            randomize_graph(G)
+
+        local_scores = [
+            local_score(i, list(G.predecessors(i)), data, r) for i in G.nodes()
+        ]
+        initial_score = sum(local_scores)
+        print("Initial score:", initial_score)
+
+        G, score, used = explore_loop(G, data, r, local_scores, trials=trials - trials_used)
+        trials_used += max(used, 1)
+
+        if score > global_best_score:
+            global_best_score = score
+            global_best_edges = list(G.edges())
+
+        restart += 1
+
+    G.remove_edges_from(list(G.edges()))
+    G.add_edges_from(global_best_edges)
 
     write_gph(G, idx2names, outfile)
-    print("Score after optimization:", score)
+    print("Score after optimization:", global_best_score)
 
 def main():
     if len(sys.argv) >= 4 and sys.argv[3] == "--score":
