@@ -98,7 +98,10 @@ def bayesian_score(graph, data, r):
 
 def update_local_score(graph, i, data, r, local_scores):
     new = local_score(i, graph.predecessors(i), data, r)
+    delta = new - local_scores[i]
     local_scores[i] = new
+
+    return delta
 
 def explore_loop(graph, data, r, local_scores, trials=1000):
     """
@@ -130,8 +133,8 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
 
         # Update and see if score improved
         prev_local_score = local_scores[v]
-        update_local_score(graph, v, data, r, local_scores)
-        score = sum(local_scores)
+        delta = update_local_score(graph, v, data, r, local_scores)
+        score = best_score + delta
 
         if score > best_score:
             best_score = score
