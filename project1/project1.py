@@ -26,6 +26,23 @@ def write_gph(dag, idx2names, filename):
         for edge in dag.edges():
             f.write("{}, {}\n".format(idx2names[edge[0]], idx2names[edge[1]]))
 
+def process_csv(path):
+    """Process CSV to return data, cardinalities, idx2name dict, names2idx dict"""
+    df = pd.read_csv(path)
+    names = list(df.columns)
+
+    idx2names = {}
+    names2idx = {}
+
+    for i, name in enumerate(names):
+        idx2names[i] = name
+        names2idx[name] = i
+    
+    data = df.to_numpy(dtype=int)
+    r = data.max(axis=0)
+
+    return data, r, idx2names, names2idx
+
 ###############################################################################
 # Compute Bayesian Score
 ###############################################################################
@@ -74,29 +91,16 @@ def bayesian_score(graph, data, r):
 
     return sum(i_scores)
 
-def process_csv(path):
-    """Process CSV to return data, cardinalities, idx2name dict, names2idx dict"""
-    df = pd.read_csv(path)
-    names = list(df.columns)
+def update_local_score(graph, i, data, r, local_scores):
+    new = local_score(i, graph.predecessors(i), data, r)
+    local_scores[i] = new
 
-    idx2names = {}
-    names2idx = {}
-
-    for i, name in enumerate(names):
-        idx2names[i] = name
-        names2idx[name] = i
-    
-    data = df.to_numpy(dtype=int)
-    r = data.max(axis=0)
-
-    return data, r, idx2names, names2idx
-
-def explore_loop(graph, data, r, initial_score, trials=1000):
+def explore_loop(graph, data, r, local_scores, trials=1000):
     """
     Explore graphs
     Add random edge. If it improves score, keep it. If not, throw it out.
     """
-    best_score = initial_score
+    best_score = sum(local_scores)
     nodes = list(graph.nodes())
     n = len(nodes)
     t0 = time.perf_counter()
@@ -119,12 +123,15 @@ def explore_loop(graph, data, r, initial_score, trials=1000):
             graph.remove_edge(u, v)
             continue
 
-        score = bayesian_score(graph, data, r)
+        # Update and see if score improved
+        update_local_score(graph, v, data, r, local_scores)
+        score = sum(local_scores)
 
         if score > best_score:
             best_score = score
         else:
             graph.remove_edge(u, v)
+            update_local_score(graph, v, data, r, local_scores)
 
     return graph, best_score
 
@@ -135,10 +142,11 @@ def explore(infile, outfile):
     G = networkx.DiGraph()
     G.add_nodes_from(range(data.shape[1]))
 
-    initial_score = bayesian_score(G, data, r)
+    local_scores = [local_score(i, [], data, r) for i in G.nodes()]
+    initial_score = sum(local_scores)
     print("Initial score:", initial_score)
 
-    G, score = explore_loop(G, data, r, initial_score, 10000)
+    G, score = explore_loop(G, data, r, local_scores, trials=10000)
 
     write_gph(G, idx2names, outfile)
     print("Score after optimization:", score)
