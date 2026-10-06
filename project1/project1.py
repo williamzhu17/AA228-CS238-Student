@@ -74,10 +74,19 @@ def count_ijk(i, parents, data, r):
 
     return M
 
+_score_cache = {}
+
 def local_score(i, parents, data, r):
     """Bayesian score for X_i given parents"""
     parents = list(parents)
 
+    # Check if in cache
+    key = (i, frozenset(parents))
+
+    if key in _score_cache:
+        return _score_cache[key]
+    
+    # Compute
     M = count_ijk(i, parents, data, r)
     r_i = r[i]
 
@@ -91,6 +100,9 @@ def local_score(i, parents, data, r):
     score = np.sum(
         gammaln(a_ij0) - gammaln(a_ij0 + m_ij0) + np.sum(gammaln(1 + M), axis=1)
     )
+
+    # Add to cache
+    _score_cache[key] = score
 
     return float(score)
 
