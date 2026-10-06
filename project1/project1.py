@@ -22,9 +22,10 @@ def read_gph(names2idx, filename):
     return G
 
 def write_gph(dag, idx2names, filename):
+    edges = sorted((idx2names[u], idx2names[v]) for u, v in dag.edges())
     with open(filename, 'w') as f:
-        for edge in dag.edges():
-            f.write("{}, {}\n".format(idx2names[edge[0]], idx2names[edge[1]]))
+        for parent, child in edges:
+            f.write("{}, {}\n".format(parent, child))
 
 def process_csv(path):
     """Process CSV to return data, cardinalities, idx2name dict, names2idx dict"""
@@ -132,12 +133,8 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
 
     j_cache = [np.zeros(data.shape[0], dtype=int) for _ in range(n)]
 
-    for trial in range(trials):
-        if (trial + 1) % 1000 == 0:
-            elapsed = time.perf_counter() - t0
-            rate = (trial + 1) / elapsed
-            print(f"Trial {trial + 1}/{trials}, best_score={best_score}, {rate:.1f} trials/s")
-
+    trial = 0
+    while trial < trials:
         # 0 = add edge
         # 1 = delete edge
         # 2 = flip edge
@@ -229,9 +226,15 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
                 local_scores[i] = prev_local_scores[i]
                 j_cache[i] = prev_j[i]
 
+        trial += 1
+        if trial % 10000 == 0:
+            elapsed = time.perf_counter() - t0
+            rate = trial / elapsed
+            print(f"Trial {trial}/{trials}, best_score={best_score}, {rate:.1f} trials/s")
+
     return graph, best_score
 
-def explore(infile, outfile):
+def explore(infile, outfile, trials=10000):
     data, r, idx2names, names2idx = process_csv(infile)
 
     # Initialize empty graph
@@ -242,27 +245,28 @@ def explore(infile, outfile):
     initial_score = sum(local_scores)
     print("Initial score:", initial_score)
 
-    G, score = explore_loop(G, data, r, local_scores, trials=10000)
+    G, score = explore_loop(G, data, r, local_scores, trials=trials)
 
     write_gph(G, idx2names, outfile)
     print("Score after optimization:", score)
 
 def main():
-    if len(sys.argv) == 4 and sys.argv[3] == "--score":
+    if len(sys.argv) >= 4 and sys.argv[3] == "--score":
         data, r, _, names2idx = process_csv(sys.argv[1])
         G = read_gph(names2idx, sys.argv[2])
         print(bayesian_score(G, data, r))
         return
 
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         raise Exception(
-            "usage: python project1.py <infile>.csv <outfile>.gph\n"
+            "usage: python project1.py <infile>.csv <outfile>.gph [trials]\n"
             "       python project1.py <infile>.csv <graph>.gph --score"
         )
 
     inputfilename = sys.argv[1]
     outputfilename = sys.argv[2]
-    explore(inputfilename, outputfilename)
+    trials = int(sys.argv[3]) if len(sys.argv) == 4 else 10000
+    explore(inputfilename, outputfilename, trials=trials)
 
 
 if __name__ == '__main__':
