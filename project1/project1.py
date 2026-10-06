@@ -70,8 +70,7 @@ def count_ijk(i, parents, data, r):
         q_i = int(np.prod(parent_dims))
         j = np.ravel_multi_index(data[:, parents].T, parent_dims)
 
-    M = np.zeros((q_i, r_i), dtype=int)
-    np.add.at(M, (j, data[:, i]), 1)
+    M = np.bincount(j * r_i + data[:, i], minlength=q_i * r_i).reshape(q_i, r_i)
 
     return M
 
