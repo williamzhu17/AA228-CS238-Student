@@ -124,6 +124,7 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
             continue
 
         # Update and see if score improved
+        prev_local_score = local_scores[v]
         update_local_score(graph, v, data, r, local_scores)
         score = sum(local_scores)
 
@@ -131,7 +132,7 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
             best_score = score
         else:
             graph.remove_edge(u, v)
-            update_local_score(graph, v, data, r, local_scores)
+            local_scores[v] = prev_local_score
 
     return graph, best_score
 
