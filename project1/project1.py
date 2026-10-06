@@ -124,12 +124,12 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
         if u == v or graph.has_edge(u, v):
             continue
 
-        graph.add_edge(u, v)
-
-        # Reject if it creates a cycle
-        if not networkx.is_directed_acyclic_graph(graph):
-            graph.remove_edge(u, v)
+        # Reject if creates a cycle
+        # Cycle iff there is already a path from v to u
+        if networkx.has_path(graph, v, u):
             continue
+
+        graph.add_edge(u, v)
 
         # Update and see if score improved
         prev_local_score = local_scores[v]
