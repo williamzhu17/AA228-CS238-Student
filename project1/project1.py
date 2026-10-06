@@ -124,7 +124,7 @@ def update_local_score(graph, i, data, r, local_scores, j=None):
 def explore_loop(graph, data, r, local_scores, trials=1000):
     """
     Explore graphs
-    Add random edge. If it improves score, keep it. If not, throw it out.
+    Explore all possible valid moves and choose the one with the best delta
     """
     best_score = sum(local_scores)
     nodes = list(graph.nodes())
@@ -135,85 +135,83 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
 
     trial = 0
     while trial < trials:
-        # 0 = add edge
-        # 1 = delete edge
-        # 2 = flip edge
-        move = np.random.randint(3)
         edges = list(graph.edges())
+        candidates = []
 
-        if move == 0:       # add edge
-            # Pick a random directed edge that is not already present
-            u, v = np.random.randint(0, n, size=2)
-            if u == v or graph.has_edge(u, v):
-                continue
+        # add edge candidates - 0 = add
+        for u in range(n):
+            for v in range(n):
+                # Skip same nodes, existing edges, or edges that creates cycles
+                if u == v or graph.has_edge(u, v) or networkx.has_path(graph, v, u):
+                    continue
+                
+                candidates.append((0, u, v))
+        
+        # delete edge candidates - 1 = delete
+        for u, v in edges:
+            candidates.append((1, u, v))
 
-            # Reject if creates a cycle
-            # Cycle iff there is already a path from v to u
-            if networkx.has_path(graph, v, u):
-                continue
+        # flip edge candidates - 2 = flip
+        for u, v in edges:
+            graph.remove_edge(u, v)
+
+            if not networkx.has_path(graph, u, v):
+                candidates.append((2, u, v))
 
             graph.add_edge(u, v)
-            affected = [v]
-        elif move == 1:     # delete edge
-            if not edges:
-                continue
 
-            # Pick random edge that exists and remove
-            u, v = edges[np.random.randint(len(edges))]
-            graph.remove_edge(u, v)
-            affected = [v]
-        else:               # flip edge
-            if not edges:
-                continue
+        best_move = None
+        best_delta = 0.0
+        best_j_new = None
+        best_local_scores = None
 
-            u, v = edges[np.random.randint(len(edges))]
-            graph.remove_edge(u, v)
-
-            # Check if if flipping will create cycle
-            if networkx.has_path(graph, u, v):
-                # Go back and restore old edge
+        for move, u, v in candidates:
+            if move == 0:       # add edge
                 graph.add_edge(u, v)
-                continue
+                affected = [v]
+            elif move == 1:     # delete edge
+                graph.remove_edge(u, v)
+                affected = [v]
+            else:               # flip edge
+                graph.remove_edge(u, v)
+                graph.add_edge(v, u)
+                affected = [u, v]
 
-            graph.add_edge(v, u)
-            affected = [u, v]
+            # Update and see if score improved
+            prev_local_scores = {i: local_scores[i] for i in affected}
+            prev_j = {i: j_cache[i] for i in affected}
+            j_new = {}
+            delta = 0.0
 
-        # Update and see if score improved
-        prev_local_scores = {i: local_scores[i] for i in affected}
-        prev_j = {i: j_cache[i] for i in affected}
-        j_new = {}
+            for i in affected:
+                if move == 0:
+                    # add increments j
+                    j_new[i] = j_cache[i] * int(r[u]) + data[:, u]
+                    delta += update_local_score(graph, i, data, r, local_scores, j=j_new[i])
+                elif move == 2 and i == u:
+                    # on flip, u gains parent and can increment j cache
+                    j_new[i] = j_cache[i] * int(r[v]) + data[:, v]
+                    delta += update_local_score(graph, i, data, r, local_scores, j=j_new[i])
+                else: 
+                    delta += update_local_score(graph, i, data, r, local_scores)
 
-        delta = 0.0
+                    # Reset j cache
+                    parents = list(graph.predecessors(i))
+                    if parents:
+                        j_new[i] = np.ravel_multi_index(
+                            data[:, parents].T, tuple(int(r[p]) for p in parents)
+                        )
+                    else:
+                        j_new[i] = np.zeros(data.shape[0], dtype=int)
 
-        for i in affected:
-            if move == 0:
-                # add increments j
-                j_new[i] = j_cache[i] * int(r[u]) + data[:, u]
-                delta += update_local_score(graph, i, data, r, local_scores, j=j_new[i])
-            elif move == 2 and i == u:
-                # on flip, u gains parent and can increment j cache
-                j_new[i] = j_cache[i] * int(r[v]) + data[:, v]
-                delta += update_local_score(graph, i, data, r, local_scores, j=j_new[i])
-            else: 
-                delta += update_local_score(graph, i, data, r, local_scores)
+            # Track best before undoing
+            if delta > best_delta:
+                best_delta = delta
+                best_move = (move, u, v)
+                best_j_new = j_new
+                best_local_scores = {i: local_scores[i] for i in affected}
 
-                # Reset j cache
-                parents = list(graph.predecessors(i))
-                if parents:
-                    j_new[i] = np.ravel_multi_index(
-                        data[:, parents].T, tuple(int(r[p]) for p in parents)
-                    )
-                else:
-                    j_new[i] = np.zeros(data.shape[0], dtype=int)
-
-        score = best_score + delta
-
-        if score > best_score:
-            best_score = score
-
-            for i, j in j_new.items():
-                j_cache[i] = j
-        else:
+            # Undo current move
             if move == 0:
                 graph.remove_edge(u, v)
             elif move == 1:
@@ -221,13 +219,36 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
             else:
                 graph.remove_edge(v, u)
                 graph.add_edge(u, v)
-            
+
+            # Undo caches
             for i in affected:
                 local_scores[i] = prev_local_scores[i]
                 j_cache[i] = prev_j[i]
 
+        if best_move is None:
+            print(f"No better move found at step {trial}, best_score={best_score}")
+            break
+
+        # Save best move
+        move, u, v = best_move
+
+        if move == 0:
+            graph.add_edge(u, v)
+        elif move == 1:
+            graph.remove_edge(u, v)
+        else:
+            graph.remove_edge(u, v)
+            graph.add_edge(v, u)
+
+        for i, s in best_local_scores.items():
+            local_scores[i] = s
+        for i, j in best_j_new.items():
+            j_cache[i] = j
+
+        best_score += best_delta
+
         trial += 1
-        if trial % 10000 == 0:
+        if trial % 10 == 0:
             elapsed = time.perf_counter() - t0
             rate = trial / elapsed
             print(f"Trial {trial}/{trials}, best_score={best_score}, {rate:.1f} trials/s")
