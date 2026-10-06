@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import gammaln
 import sys
+import time
 
 def read_gph(names2idx, filename):
     G = networkx.DiGraph()
@@ -98,10 +99,13 @@ def explore_loop(graph, data, r, initial_score, trials=1000):
     best_score = initial_score
     nodes = list(graph.nodes())
     n = len(nodes)
+    t0 = time.perf_counter()
 
     for trial in range(trials):
         if (trial + 1) % 1000 == 0:
-            print(f"Trial {trial + 1}/{trials}, best_score={best_score}")
+            elapsed = time.perf_counter() - t0
+            rate = (trial + 1) / elapsed
+            print(f"Trial {trial + 1}/{trials}, best_score={best_score}, {rate:.1f} trials/s")
 
         # Pick a random directed edge that is not already present
         u, v = np.random.randint(0, n, size=2)
