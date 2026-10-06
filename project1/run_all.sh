@@ -6,9 +6,9 @@ cd "$(dirname "$0")"
 PYTHON="${PYTHON:-.venv/bin/python}"
 
 # Configure trials per dataset here (or override via env vars)
-SMALL_TRIALS="${SMALL_TRIALS:-1000}"
-MEDIUM_TRIALS="${MEDIUM_TRIALS:-1000}"
-LARGE_TRIALS="${LARGE_TRIALS:-1000}"
+SMALL_TRIALS="${SMALL_TRIALS:-5000}"
+MEDIUM_TRIALS="${MEDIUM_TRIALS:-5000}"
+LARGE_TRIALS="${LARGE_TRIALS:-5000}"
 
 run_one() {
   local size="$1"
@@ -21,3 +21,9 @@ run_one() {
 run_one small  "${SMALL_TRIALS}"
 run_one medium "${MEDIUM_TRIALS}"
 run_one large  "${LARGE_TRIALS}"
+
+echo "========== scores =========="
+for size in small medium large; do
+  echo -n "${size}: "
+  "${PYTHON}" project1.py "data/${size}.csv" "data/${size}.gph" --score
+done

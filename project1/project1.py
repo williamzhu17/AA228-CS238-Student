@@ -143,7 +143,7 @@ def randomize_graph(graph, p=0.1, max_parents=10):
 
     return graph
 
-def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50, max_parents=10, improve_eps=1e-4):
+def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50, max_parents=15, improve_eps=1e-4):
     """
     Explore graphs
     Explore all possible valid moves and choose the one with the best delta
