@@ -37,9 +37,9 @@ def process_csv(path):
     for i, name in enumerate(names):
         idx2names[i] = name
         names2idx[name] = i
-    
-    data = df.to_numpy(dtype=int)
-    r = data.max(axis=0)
+
+    data = df.to_numpy(dtype=int) - 1
+    r = data.max(axis=0) + 1
 
     return data, r, idx2names, names2idx
 
@@ -52,21 +52,26 @@ def parent_config_index(row, parents, r):
     if len(parents) == 0:
         return 0
 
-    parent_values = tuple(row[p] - 1 for p in parents)
+    parent_values = tuple(row[p] for p in parents)
     parent_dims = tuple(r[p] for p in parents)
     return int(np.ravel_multi_index(parent_values, parent_dims))
 
 def count_ijk(i, parents, data, r):
     """Build count table M for variable X_i"""
+    parents = list(parents)
     r_i = int(r[i])
-    q_i = int(np.prod([r[p] for p in parents])) if parents else 1
+    n = data.shape[0]
+
+    if not parents:
+        q_i = 1
+        j = np.zeros(n, dtype=int)
+    else:
+        parent_dims = tuple(int(r[p]) for p in parents)
+        q_i = int(np.prod(parent_dims))
+        j = np.ravel_multi_index(data[:, parents].T, parent_dims)
 
     M = np.zeros((q_i, r_i), dtype=int)
-
-    for row in data:
-        j = parent_config_index(row, parents, r)
-        k = row[i] - 1
-        M[j, k] += 1
+    np.add.at(M, (j, data[:, i]), 1)
 
     return M
 
