@@ -90,6 +90,39 @@ def process_csv(path):
 
     return data, r, idx2names, names2idx
 
+def explore_loop(graph, data, r, initial_score, trials=1000):
+    """
+    Explore graphs
+    Add random edge. If it improves score, keep it. If not, throw it out.
+    """
+    best_score = initial_score
+    nodes = list(graph.nodes())
+    n = len(nodes)
+
+    for trial in range(trials):
+        if (trial + 1) % 1000 == 0:
+            print(f"Trial {trial + 1}/{trials}, best_score={best_score}")
+
+        # Pick a random directed edge that is not already present
+        u, v = np.random.randint(0, n, size=2)
+        if u == v or graph.has_edge(u, v):
+            continue
+
+        graph.add_edge(u, v)
+
+        # Reject if it creates a cycle
+        if not networkx.is_directed_acyclic_graph(graph):
+            graph.remove_edge(u, v)
+            continue
+
+        score = bayesian_score(graph, data, r)
+
+        if score > best_score:
+            best_score = score
+        else:
+            graph.remove_edge(u, v)
+
+    return graph, best_score
 
 def explore(infile, outfile):
     data, r, idx2names, names2idx = process_csv(infile)
@@ -98,9 +131,13 @@ def explore(infile, outfile):
     G = networkx.DiGraph()
     G.add_nodes_from(range(data.shape[1]))
 
-    score = bayesian_score(G, data, r)
+    initial_score = bayesian_score(G, data, r)
+    print("Initial score:", initial_score)
 
-    print(score)
+    G, score = explore_loop(G, data, r, initial_score, 10000)
+
+    write_gph(G, idx2names, outfile)
+    print("Score after optimization:", score)
 
 def main():
     if len(sys.argv) == 4 and sys.argv[3] == "--score":
