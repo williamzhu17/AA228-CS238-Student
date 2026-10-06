@@ -1,9 +1,11 @@
 import networkx
 import numpy as np
 import pandas as pd
-from scipy.special import gammaln
 import sys
 import time
+
+from collections import deque
+from scipy.special import gammaln
 
 def read_gph(names2idx, filename):
     G = networkx.DiGraph()
@@ -121,17 +123,22 @@ def update_local_score(graph, i, data, r, local_scores, j=None):
 
     return delta
 
-def explore_loop(graph, data, r, local_scores, trials=1000):
+def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10):
     """
     Explore graphs
     Explore all possible valid moves and choose the one with the best delta
+    Have tabu list to escape local max
+    Have aspiration to allow a tabu move if it beats global max
     """
     best_score = sum(local_scores)
+    global_best_score = best_score
+    global_best_edges = list(graph.edges())
     nodes = list(graph.nodes())
     n = len(nodes)
     t0 = time.perf_counter()
 
     j_cache = [np.zeros(data.shape[0], dtype=int) for _ in range(n)]
+    tabu = deque(maxlen=tabu_tenure)
 
     trial = 0
     while trial < trials:
@@ -161,7 +168,7 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
             graph.add_edge(u, v)
 
         best_move = None
-        best_delta = 0.0
+        best_delta = -np.inf
         best_j_new = None
         best_local_scores = None
 
@@ -204,8 +211,11 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
                     else:
                         j_new[i] = np.zeros(data.shape[0], dtype=int)
 
+            # Skip tabu unless aspiration
+            allowed = (move, u, v) not in tabu or best_score + delta > global_best_score
+
             # Track best before undoing
-            if delta > best_delta:
+            if allowed and delta > best_delta:
                 best_delta = delta
                 best_move = (move, u, v)
                 best_j_new = j_new
@@ -234,11 +244,14 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
 
         if move == 0:
             graph.add_edge(u, v)
+            tabu.append((1, u, v))
         elif move == 1:
             graph.remove_edge(u, v)
+            tabu.append((0, u, v))
         else:
             graph.remove_edge(u, v)
             graph.add_edge(v, u)
+            tabu.append((2, v, u))
 
         for i, s in best_local_scores.items():
             local_scores[i] = s
@@ -247,13 +260,20 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
 
         best_score += best_delta
 
+        if best_score > global_best_score:
+            global_best_score = best_score
+            global_best_edges = list(graph.edges())
+
         trial += 1
         if trial % 10 == 0:
             elapsed = time.perf_counter() - t0
             rate = trial / elapsed
             print(f"Trial {trial}/{trials}, best_score={best_score}, {rate:.1f} trials/s")
 
-    return graph, best_score
+    graph.remove_edges_from(list(graph.edges()))
+    graph.add_edges_from(global_best_edges)
+
+    return graph, global_best_score
 
 def explore(infile, outfile, trials=10000):
     data, r, idx2names, names2idx = process_csv(infile)
