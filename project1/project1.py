@@ -85,6 +85,10 @@ def local_score(i, parents, data, r):
     a_ij0 = r_i
     m_ij0 = M.sum(axis=1)
 
+    observed = m_ij0 > 0
+    M = M[observed]
+    m_ij0 = m_ij0[observed]
+
     score = np.sum(
         gammaln(a_ij0) - gammaln(a_ij0 + m_ij0) + np.sum(gammaln(1 + M), axis=1)
     )
