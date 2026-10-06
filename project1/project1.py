@@ -123,7 +123,7 @@ def update_local_score(graph, i, data, r, local_scores, j=None):
 
     return delta
 
-def randomize_graph(graph, p=0.1):
+def randomize_graph(graph, p=0.1, max_parents=10):
     """Initialize random DAG"""
     _score_cache.clear()
     graph.remove_edges_from(list(graph.edges()))
@@ -135,12 +135,15 @@ def randomize_graph(graph, p=0.1):
         for b in range(a + 1, n):
             child = int(order[b])
 
+            if graph.in_degree(child) >= max_parents:
+                continue
+
             if np.random.random() < p:
                 graph.add_edge(int(order[a]), child)
 
     return graph
 
-def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50):
+def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50, max_parents=10, improve_eps=1e-4):
     """
     Explore graphs
     Explore all possible valid moves and choose the one with the best delta
@@ -179,18 +182,22 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, pati
         # add edge candidates - 0 = add
         for u in range(n):
             for v in range(n):
-                # Skip same nodes, existing edges, or edges that creates cycles
-                if u == v or graph.has_edge(u, v) or networkx.has_path(graph, v, u):
+                # Skip same nodes, existing edges, parent cap, or edges that create cycles
+                if (u == v or graph.has_edge(u, v) or graph.in_degree(v) >= max_parents or networkx.has_path(graph, v, u)):
                     continue
-                
+
                 candidates.append((0, u, v))
-        
+
         # delete edge candidates - 1 = delete
         for u, v in edges:
             candidates.append((1, u, v))
 
         # flip edge candidates - 2 = flip
         for u, v in edges:
+            # Flip gives u a new parent
+            if graph.in_degree(u) >= max_parents:
+                continue
+
             graph.remove_edge(u, v)
 
             if not networkx.has_path(graph, u, v):
@@ -291,7 +298,8 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, pati
 
         best_score += best_delta
 
-        if best_score > global_best_score:
+        # Require significant improvement so patience can trigger restarts
+        if best_score > global_best_score + improve_eps:
             global_best_score = best_score
             global_best_edges = list(graph.edges())
             stale = 0
@@ -307,7 +315,7 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, pati
                 break
 
         trial += 1
-        if trial % 10 == 0:
+        if trial % 100 == 0:
             elapsed = time.perf_counter() - t0
             rate = trial / elapsed
             print(f"Trial {trial}/{trials}, best_score={best_score}, {rate:.1f} trials/s")
@@ -344,7 +352,7 @@ def explore(infile, outfile, trials=10000):
         initial_score = sum(local_scores)
         print("Initial score:", initial_score)
 
-        G, score, used = explore_loop(G, data, r, local_scores, trials=trials - trials_used)
+        G, score, used = explore_loop(G, data, r, local_scores, trials=trials - trials_used, max_parents=10)
         trials_used += max(used, 1)
 
         if score > global_best_score:
