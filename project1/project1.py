@@ -56,7 +56,7 @@ def parent_config_index(row, parents, r):
     parent_dims = tuple(r[p] for p in parents)
     return int(np.ravel_multi_index(parent_values, parent_dims))
 
-def count_ijk(i, parents, data, r):
+def count_ijk(i, parents, data, r, j=None):
     """Build count table M for variable X_i"""
     parents = list(parents)
     r_i = int(r[i])
@@ -64,11 +64,13 @@ def count_ijk(i, parents, data, r):
 
     if not parents:
         q_i = 1
-        j = np.zeros(n, dtype=int)
+        if j is None:
+            j = np.zeros(n, dtype=int)
     else:
         parent_dims = tuple(int(r[p]) for p in parents)
         q_i = int(np.prod(parent_dims))
-        j = np.ravel_multi_index(data[:, parents].T, parent_dims)
+        if j is None:
+            j = np.ravel_multi_index(data[:, parents].T, parent_dims)
 
     M = np.bincount(j * r_i + data[:, i], minlength=q_i * r_i).reshape(q_i, r_i)
 
@@ -76,7 +78,7 @@ def count_ijk(i, parents, data, r):
 
 _score_cache = {}
 
-def local_score(i, parents, data, r):
+def local_score(i, parents, data, r, j=None):
     """Bayesian score for X_i given parents"""
     parents = list(parents)
 
@@ -87,7 +89,7 @@ def local_score(i, parents, data, r):
         return _score_cache[key]
     
     # Compute
-    M = count_ijk(i, parents, data, r)
+    M = count_ijk(i, parents, data, r, j=j)
     r_i = r[i]
 
     a_ij0 = r_i
@@ -111,8 +113,8 @@ def bayesian_score(graph, data, r):
 
     return sum(i_scores)
 
-def update_local_score(graph, i, data, r, local_scores):
-    new = local_score(i, graph.predecessors(i), data, r)
+def update_local_score(graph, i, data, r, local_scores, j=None):
+    new = local_score(i, graph.predecessors(i), data, r, j=j)
     delta = new - local_scores[i]
     local_scores[i] = new
 
@@ -127,6 +129,8 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
     nodes = list(graph.nodes())
     n = len(nodes)
     t0 = time.perf_counter()
+
+    j_cache = [np.zeros(data.shape[0], dtype=int) for _ in range(n)]
 
     for trial in range(trials):
         if (trial + 1) % 1000 == 0:
@@ -148,11 +152,13 @@ def explore_loop(graph, data, r, local_scores, trials=1000):
 
         # Update and see if score improved
         prev_local_score = local_scores[v]
-        delta = update_local_score(graph, v, data, r, local_scores)
+        j_new = j_cache[v] * int(r[u]) + data[:, u]
+        delta = update_local_score(graph, v, data, r, local_scores, j=j_new)
         score = best_score + delta
 
         if score > best_score:
             best_score = score
+            j_cache[v] = j_new
         else:
             graph.remove_edge(u, v)
             local_scores[v] = prev_local_score
