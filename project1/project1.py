@@ -440,6 +440,7 @@ def explore(infile, outfile, trials=10000, n_workers=None):
                 f"Keeping existing {outfile}: "
                 f"new={global_best_score:} <= existing={existing_score:}"
             )
+            print(f"Total time: {time.perf_counter() - search_start:.2f}s")
             return
 
         print(
