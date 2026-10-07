@@ -1,10 +1,12 @@
 import networkx
 import numpy as np
+import os
 import pandas as pd
 import sys
 import time
 
 from collections import deque
+from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from scipy.special import gammaln
 
 def read_gph(names2idx, filename):
@@ -143,7 +145,7 @@ def randomize_graph(graph, p=0.1, max_parents=10):
 
     return graph
 
-def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50, max_parents=15, improve_eps=1e-4):
+def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50, max_parents=10, improve_eps=1e-4):
     """
     Explore graphs
     Explore all possible valid moves and choose the one with the best delta
@@ -274,7 +276,6 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, pati
                 j_cache[i] = prev_j[i]
 
         if best_move is None:
-            print(f"No better move found at step {trial}, best_score={best_score}")
             break
 
         # Save best move
@@ -307,26 +308,35 @@ def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, pati
             stale += 1
 
             if stale >= patience:
-                print(
-                    f"Score saturated at step {trial} "
-                    f"(no improvement for {patience} steps), "
-                    f"best_score={global_best_score}"
-                )
                 break
 
         trial += 1
-        if trial % 100 == 0:
-            elapsed = time.perf_counter() - t0
-            rate = trial / elapsed
-            print(f"Trial {trial}/{trials}, best_score={best_score}, {rate:.1f} trials/s")
 
     graph.remove_edges_from(list(graph.edges()))
     graph.add_edges_from(global_best_edges)
 
-    return graph, global_best_score, trial
+    elapsed = time.perf_counter() - t0
+    return graph, global_best_score, trial, elapsed
 
-def explore(infile, outfile, trials=10000):
+def run_random_restart(data, r, seed, trials=10000, max_parents=10):
+    """Worker function for random restart hill climb"""
+    np.random.seed(seed)
+    _score_cache.clear()
+
+    G = networkx.DiGraph()
+    G.add_nodes_from(range(data.shape[1]))
+    randomize_graph(G)
+
+    local_scores = [local_score(i, list(G.predecessors(i)), data, r) for i in G.nodes()]
+    G, score, used, elapsed = explore_loop(G, data, r, local_scores, trials=trials, max_parents=max_parents)
+
+    return score, list(G.edges()), used, elapsed
+
+def explore(infile, outfile, trials=10000, n_workers=None):
     data, r, idx2names, names2idx = process_csv(infile)
+
+    if n_workers is None:
+        n_workers = os.cpu_count() - 1 or 4
 
     # Initialize empty graph
     G = networkx.DiGraph()
@@ -336,30 +346,76 @@ def explore(infile, outfile, trials=10000):
     global_best_edges = []
     trials_used = 0
     restart = 0
+    max_parents = 15
 
-    while trials_used < trials:
-        if restart == 0:
-            _score_cache.clear()
-            G.remove_edges_from(list(G.edges()))
-            print("Starting with empty graph")
-        else:
-            print(f"Restarting with random graph (restart {restart})")
-            randomize_graph(G)
+    # First run with empty graph and single process
+    _score_cache.clear()
+    G.remove_edges_from(list(G.edges()))
 
-        local_scores = [
-            local_score(i, list(G.predecessors(i)), data, r) for i in G.nodes()
-        ]
-        initial_score = sum(local_scores)
-        print("Initial score:", initial_score)
+    local_scores = [local_score(i, list(G.predecessors(i)), data, r) for i in G.nodes()]
+    G, score, used, elapsed = explore_loop(
+        G, data, r, local_scores, trials=trials, max_parents=max_parents
+    )
 
-        G, score, used = explore_loop(G, data, r, local_scores, trials=trials - trials_used, max_parents=10)
-        trials_used += max(used, 1)
+    trials_used += max(used, 1)
+    global_best_score = score
+    global_best_edges = list(G.edges())
+    rate = used / elapsed if elapsed > 0 else 0.0
+    remaining = max(0, trials - trials_used)
+    restart = 1
 
-        if score > global_best_score:
-            global_best_score = score
-            global_best_edges = list(G.edges())
+    print(
+        f"[empty] saturated after {used} steps, "
+        f"score={score:.4f}, best={global_best_score:.4f}, "
+        f"{elapsed:.2f}s, {rate:.1f} trials/s, remaining={remaining}"
+    )
 
-        restart += 1
+    # Parallel section
+    if trials_used <= trials:
+        base_seed = int(np.random.randint(0, 2**31 - 1))
+        futures = {}
+
+        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+            def run_one():
+                nonlocal restart
+                fut = pool.submit(
+                    run_random_restart,
+                    data,
+                    r,
+                    base_seed + restart,
+                    trials,
+                    max_parents,
+                )
+
+                futures[fut] = restart
+                restart += 1
+
+            while futures or trials_used <= trials:
+                while len(futures) < n_workers and trials_used <= trials:
+                    run_one()
+
+                if not futures:
+                    break
+
+                done, _ = wait(futures, return_when=FIRST_COMPLETED)
+
+                for fut in done:
+                    rid = futures.pop(fut)
+                    score, edges, used, elapsed = fut.result()
+                    trials_used += max(used, 1)
+
+                    if score > global_best_score:
+                        global_best_score = score
+                        global_best_edges = edges
+
+                    rate = used / elapsed if elapsed > 0 else 0.0
+                    remaining = max(0, trials - trials_used)
+
+                    print(
+                        f"[restart {rid}] saturated after {used} steps, "
+                        f"score={score:.4f}, best={global_best_score:.4f}, "
+                        f"{elapsed:.2f}s, {rate:.1f} trials/s, remaining={remaining}"
+                    )
 
     G.remove_edges_from(list(G.edges()))
     G.add_edges_from(global_best_edges)
