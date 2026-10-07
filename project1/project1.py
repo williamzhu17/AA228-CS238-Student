@@ -432,7 +432,7 @@ def explore(infile, outfile, trials=10000, n_workers=None):
         existing = read_gph(names2idx, outfile)
         existing_score = bayesian_score(existing, data, r)
 
-        if global_best_score < existing_score:
+        if global_best_score <= existing_score:
             print(
                 f"Keeping existing {outfile}: "
                 f"new={global_best_score:.4f} <= existing={existing_score:.4f}"
