@@ -7,9 +7,9 @@ exec > >(tee run.log) 2>&1
 PYTHON="${PYTHON:-.venv/bin/python}"
 
 # Configure trials per dataset here (or override via env vars)
-SMALL_TRIALS="${SMALL_TRIALS:-100000}"
-MEDIUM_TRIALS="${MEDIUM_TRIALS:-100000}"
-LARGE_TRIALS="${LARGE_TRIALS:-100000}"
+SMALL_TRIALS="${SMALL_TRIALS:-10000}"
+MEDIUM_TRIALS="${MEDIUM_TRIALS:-10000}"
+LARGE_TRIALS="${LARGE_TRIALS:-10000}"
 
 run_one() {
   local size="$1"
