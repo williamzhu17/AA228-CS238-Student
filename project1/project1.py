@@ -342,6 +342,7 @@ def run_random_restart(data, r, seed, trials=10000, max_parents=10):
     return score, list(G.edges()), used, elapsed
 
 def explore(infile, outfile, trials=10000, n_workers=None):
+    search_start = time.perf_counter()
     data, r, idx2names, names2idx = process_csv(infile)
 
     if n_workers is None:
@@ -449,6 +450,7 @@ def explore(infile, outfile, trials=10000, n_workers=None):
     write_gph(G, idx2names, outfile)
     plot_gph(G, idx2names, os.path.splitext(outfile)[0] + ".png")
     print("Score after optimization:", global_best_score)
+    print(f"Total time: {time.perf_counter() - search_start:.2f}s")
 
 def main():
     if len(sys.argv) >= 4 and sys.argv[3] == "--score":
