@@ -11,7 +11,7 @@ from scipy.special import gammaln
 
 import matplotlib.pyplot as plt
 
-improve_eps = 1e-8
+improve_eps = 1e-6
 
 def read_gph(names2idx, filename):
     G = networkx.DiGraph()
