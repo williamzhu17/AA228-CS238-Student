@@ -11,6 +11,8 @@ from scipy.special import gammaln
 
 import matplotlib.pyplot as plt
 
+improve_eps = 1e-8
+
 def read_gph(names2idx, filename):
     G = networkx.DiGraph()
     G.add_nodes_from(range(len(names2idx)))
@@ -152,7 +154,7 @@ def randomize_graph(graph, p=0.1, max_parents=10):
 
     return graph
 
-def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50, max_parents=10, improve_eps=1e-4):
+def explore_loop(graph, data, r, local_scores, trials=1000, tabu_tenure=10, patience=50, max_parents=10):
     """
     Explore graphs
     Explore all possible valid moves and choose the one with the best delta
@@ -432,16 +434,16 @@ def explore(infile, outfile, trials=10000, n_workers=None):
         existing = read_gph(names2idx, outfile)
         existing_score = bayesian_score(existing, data, r)
 
-        if global_best_score <= existing_score:
+        if global_best_score - existing_score <= improve_eps:
             print(
                 f"Keeping existing {outfile}: "
-                f"new={global_best_score:.4f} <= existing={existing_score:.4f}"
+                f"new={global_best_score:} <= existing={existing_score:}"
             )
             return
 
         print(
             f"Replacing {outfile}: "
-            f"new={global_best_score:.4f} > existing={existing_score:.4f}"
+            f"new={global_best_score:} > existing={existing_score:}"
         )
 
     write_gph(G, idx2names, outfile)
