@@ -9,6 +9,8 @@ from collections import deque
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from scipy.special import gammaln
 
+import matplotlib.pyplot as plt
+
 def read_gph(names2idx, filename):
     G = networkx.DiGraph()
     G.add_nodes_from(range(len(names2idx)))
@@ -30,6 +32,11 @@ def write_gph(dag, idx2names, filename):
     with open(filename, 'w') as f:
         for parent, child in edges:
             f.write("{}, {}\n".format(parent, child))
+
+def plot_gph(dag, idx2names, filename):
+    networkx.draw(dag, labels=idx2names, with_labels=True, arrows=True)
+    plt.savefig(filename)
+    plt.close()
 
 def process_csv(path):
     """Process CSV to return data, cardinalities, idx2name dict, names2idx dict"""
@@ -420,7 +427,25 @@ def explore(infile, outfile, trials=10000, n_workers=None):
     G.remove_edges_from(list(G.edges()))
     G.add_edges_from(global_best_edges)
 
+    # Only replace existing graph and plot if the new score is better
+    if os.path.exists(outfile):
+        existing = read_gph(names2idx, outfile)
+        existing_score = bayesian_score(existing, data, r)
+
+        if global_best_score <= existing_score:
+            print(
+                f"Keeping existing {outfile}: "
+                f"new={global_best_score:.4f} <= existing={existing_score:.4f}"
+            )
+            return
+
+        print(
+            f"Replacing {outfile}: "
+            f"new={global_best_score:.4f} > existing={existing_score:.4f}"
+        )
+
     write_gph(G, idx2names, outfile)
+    plot_gph(G, idx2names, os.path.splitext(outfile)[0] + ".png")
     print("Score after optimization:", global_best_score)
 
 def main():
