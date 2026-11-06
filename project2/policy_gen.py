@@ -7,11 +7,21 @@ from pathlib import Path
 
 DATASET = None
 
+# For medium.csv
+POSITION_BIN_WIDTH = 5
+VELOCITY_BIN_WIDTH = 2
+
 CONFIG = {
     "small": {"num_states": 100, "num_actions": 4, "gamma": 0.95},
     "medium": {"num_states": 50000, "num_actions": 7, "gamma": 1.0},
     "large": {"num_states": 302020, "num_actions": 9, "gamma": 0.95},
 }
+
+def coarse_state(state):
+    position = (state - 1) % 500
+    velocity = (state - 1) // 500
+    num_positions = (500 + POSITION_BIN_WIDTH - 1) // POSITION_BIN_WIDTH
+    return 1 + position // POSITION_BIN_WIDTH + num_positions * (velocity // VELOCITY_BIN_WIDTH)
 
 def read_transitions(csv_path):
     transitions = defaultdict(list)
@@ -25,14 +35,20 @@ def read_transitions(csv_path):
             r = int(row["r"])
             sp = int(row["sp"])
 
+            if DATASET == "medium":
+                s = coarse_state(s)
+                sp = coarse_state(sp)
+
             transitions[(s, a)].append((r, sp))
 
     return dict(transitions)
 
 def generate_policy_file(Q, filename):
+    policy = Q.argmax(axis=1) + 1
     with open(filename, "w") as file:
-        for action in Q.argmax(axis=1) + 1:
-            file.write(f"{action}\n")
+        for state in range(1, CONFIG[DATASET]["num_states"] + 1):
+            row = coarse_state(state) - 1 if DATASET == "medium" else state - 1
+            file.write(f"{policy[row]}\n")
 
 def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations=10000,
                 tolerance=1e-6):
@@ -59,8 +75,10 @@ def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations
             Q_new[s - 1, a - 1] = summation / len(samples)
 
         change = np.max(np.abs(Q_new - Q_prev))
+        policy_changes = np.count_nonzero(Q_new.argmax(axis=1) != Q_prev.argmax(axis=1))
         Q_prev = Q_new
-        print(f"Iteration {iteration}: max Q change = {change:.6g}")
+        print(f"Iteration {iteration}: max Q change = {change:.6g}, "
+              f"policy changes = {policy_changes}")
 
         if change < tolerance:
             print(f"Converged after {iteration} iterations.")
@@ -84,7 +102,12 @@ def main():
 
     transitions = read_transitions(csv_path)
 
-    Q = q_iteration(transitions, **CONFIG[DATASET])
+    training_config = CONFIG[DATASET].copy()
+
+    if DATASET == "medium":
+        training_config["num_states"] = coarse_state(CONFIG[DATASET]["num_states"])
+
+    Q = q_iteration(transitions, **training_config)
 
     generate_policy_file(Q, policy_path)
 
