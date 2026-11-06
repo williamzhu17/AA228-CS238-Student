@@ -32,10 +32,14 @@ def generate_policy_file(Q, filename):
         for action in Q.argmax(axis=1) + 1:
             file.write(f"{action}\n")
 
-def q_iteration(transitions, num_states, num_actions, gamma=0.95, iterations=10):
+def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations=10000,
+                tolerance=1e-6):
     Q_prev = np.zeros((num_states, num_actions))
 
-    for _ in range(iterations):
+    print(f"Starting Q-iteration: gamma={gamma}, tolerance={tolerance}, "
+          f"max_iterations={max_iterations}")
+
+    for iteration in range(1, max_iterations + 1):
         Q_new = Q_prev.copy()
         next_values = Q_prev.max(axis=1)
 
@@ -48,7 +52,15 @@ def q_iteration(transitions, num_states, num_actions, gamma=0.95, iterations=10)
 
             Q_new[s - 1, a - 1] = summation / len(samples)
 
+        change = np.max(np.abs(Q_new - Q_prev))
         Q_prev = Q_new
+        print(f"Iteration {iteration}: max Q change = {change:.6g}")
+
+        if change < tolerance:
+            print(f"Converged after {iteration} iterations.")
+            break
+    else:
+        print("Reached the iteration limit without convergence.")
 
     return Q_prev
 
