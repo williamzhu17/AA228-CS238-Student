@@ -50,9 +50,40 @@ def generate_policy_file(Q, filename):
             row = coarse_state(state) - 1 if DATASET == "medium" else state - 1
             file.write(f"{policy[row]}\n")
 
-def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations=10000,
+def missing_pair_neighbors(transitions, num_states, num_actions):
+    # Mark pairs that have actual transition samples.
+    observed = np.zeros((num_states, num_actions), dtype=bool)
+
+    for s, a in transitions:
+        observed[s - 1, a - 1] = True
+
+    num_positions = (500 + POSITION_BIN_WIDTH - 1) // POSITION_BIN_WIDTH
+    num_velocities = (100 + VELOCITY_BIN_WIDTH - 1) // VELOCITY_BIN_WIDTH
+    rows = np.arange(num_states)
+    positions = (rows % num_positions) / num_positions
+    velocities = (rows // num_positions) / num_velocities
+
+    neighbors = []
+
+    for a in range(num_actions):
+        # Ue states with samples for this action as neighbors
+        sources = np.flatnonzero(observed[:, a])
+
+        if len(sources) == 0:
+            raise ValueError(f"No observed samples for action {a + 1}")
+
+        for row in np.flatnonzero(~observed[:, a]):
+            distances = ((positions[sources] - positions[row]) ** 2 + (velocities[sources] - velocities[row]) ** 2)
+            nearest = sources[distances.argmin()]
+            neighbors.append((row, a, nearest))
+
+    return neighbors
+
+def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations=5000,
                 tolerance=1e-6):
     Q_prev = np.zeros((num_states, num_actions))
+    neighbors = (missing_pair_neighbors(transitions, num_states, num_actions)
+                 if DATASET == "medium" else [])
 
     print(f"Starting Q-iteration: gamma={gamma}, tolerance={tolerance}, "
           f"max_iterations={max_iterations}")
@@ -73,6 +104,9 @@ def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations
                     summation += r + gamma * next_values[sp - 1]
 
             Q_new[s - 1, a - 1] = summation / len(samples)
+
+        for row, a, source in neighbors:
+            Q_new[row, a] = Q_new[source, a]
 
         change = np.max(np.abs(Q_new - Q_prev))
         policy_changes = np.count_nonzero(Q_new.argmax(axis=1) != Q_prev.argmax(axis=1))
