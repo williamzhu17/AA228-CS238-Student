@@ -10,6 +10,8 @@ DATASET = None
 # For medium.csv
 POSITION_BIN_WIDTH = 5
 VELOCITY_BIN_WIDTH = 2
+MEDIUM_GOAL_POSITION = 466
+MEDIUM_ACTION_COSTS = [-225, -100, -25, 0, -25, -100, -225]
 
 CONFIG = {
     "small": {"num_states": 100, "num_actions": 4, "gamma": 0.95},
@@ -17,14 +19,20 @@ CONFIG = {
     "large": {"num_states": 302020, "num_actions": 9, "gamma": 0.95},
 }
 
-def coarse_state(state):
+def decode_state(state):
+    """Return medium's position and velocity bin indices (not physical units)."""
     position = (state - 1) % 500
     velocity = (state - 1) // 500
+    return position, velocity
+
+def coarse_state(state):
+    position, velocity = decode_state(state)
     num_positions = (500 + POSITION_BIN_WIDTH - 1) // POSITION_BIN_WIDTH
     return 1 + position // POSITION_BIN_WIDTH + num_positions * (velocity // VELOCITY_BIN_WIDTH)
 
 def read_transitions(csv_path):
     transitions = defaultdict(list)
+    movements = defaultdict(list)
 
     with open(csv_path) as file:
         reader = csv.DictReader(file)
@@ -36,12 +44,25 @@ def read_transitions(csv_path):
             sp = int(row["sp"])
 
             if DATASET == "medium":
+                position, velocity = decode_state(s)
+                next_position, next_velocity = decode_state(sp)
+
+                delta_position = next_position - position
+                delta_velocity = next_velocity - velocity
+
                 s = coarse_state(s)
                 sp = coarse_state(sp)
+                movements[(s, a)].append((delta_position, delta_velocity))
 
             transitions[(s, a)].append((r, sp))
 
-    return dict(transitions)
+    transitions = dict(transitions)
+
+    # Since medium is sparse, preprocess generates synthetic observations based on nearby observations
+    if DATASET == "medium":
+        transitions = preprocess_medium(transitions, movements)
+
+    return transitions
 
 def generate_policy_file(Q, filename):
     policy = Q.argmax(axis=1) + 1
@@ -50,8 +71,9 @@ def generate_policy_file(Q, filename):
             row = coarse_state(state) - 1 if DATASET == "medium" else state - 1
             file.write(f"{policy[row]}\n")
 
-def missing_pair_neighbors(transitions, num_states, num_actions):
-    # Mark pairs that have actual transition samples
+def preprocess_medium(transitions, movements):
+    num_states = coarse_state(CONFIG["medium"]["num_states"])
+    num_actions = CONFIG["medium"]["num_actions"]
     observed = np.zeros((num_states, num_actions), dtype=bool)
 
     for s, a in transitions:
@@ -63,7 +85,7 @@ def missing_pair_neighbors(transitions, num_states, num_actions):
     positions = (rows % num_positions) / num_positions
     velocities = (rows // num_positions) / num_velocities
 
-    neighbors = []
+    filled = transitions.copy()
 
     for a in range(num_actions):
         # Use states with samples for this action as neighbors
@@ -76,15 +98,34 @@ def missing_pair_neighbors(transitions, num_states, num_actions):
             distances = ((positions[sources] - positions[row]) ** 2 + (velocities[sources] - velocities[row]) ** 2)
             k = min(3, len(sources))
             nearest = sources[np.argpartition(distances, k - 1)[:k]]
-            neighbors.append((row, a, nearest))
 
-    return neighbors
+            # Use the center of bin
+            p_min = (row % num_positions) * POSITION_BIN_WIDTH
+            v_min = (row // num_positions) * VELOCITY_BIN_WIDTH
+            position = (p_min + min(p_min + POSITION_BIN_WIDTH - 1, 499)) / 2
+            velocity = (v_min + min(v_min + VELOCITY_BIN_WIDTH - 1, 99)) / 2
 
-def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations=5000,
+            samples = []
+
+            for source in nearest:
+                for dp, dv in movements[(source + 1, a + 1)]:
+                    # Need to clip of out of bounds
+                    next_position = np.clip(position + dp, 0, 499)
+                    next_velocity = np.clip(velocity + dv, 0, 99)
+
+                    terminal = next_position >= MEDIUM_GOAL_POSITION
+                    reward = MEDIUM_ACTION_COSTS[a] + (100000 if terminal else 0)
+
+                    next_state = 1 + int(next_position) + 500 * int(next_velocity)
+                    samples.append((reward, coarse_state(next_state)))
+            filled[(row + 1, a + 1)] = samples
+
+    print(f"Preprocessed medium: filled {len(filled) - len(transitions)} missing pairs.")
+    return filled
+
+def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations=1000,
                 tolerance=1e-6):
     Q_prev = np.zeros((num_states, num_actions))
-    neighbors = (missing_pair_neighbors(transitions, num_states, num_actions)
-                 if DATASET == "medium" else [])
 
     print(f"Starting Q-iteration: gamma={gamma}, tolerance={tolerance}, "
           f"max_iterations={max_iterations}")
@@ -105,9 +146,6 @@ def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations
                     summation += r + gamma * next_values[sp - 1]
 
             Q_new[s - 1, a - 1] = summation / len(samples)
-
-        for row, a, sources in neighbors:
-            Q_new[row, a] = Q_new[sources, a].mean()
 
         change = np.max(np.abs(Q_new - Q_prev))
         policy_changes = np.count_nonzero(Q_new.argmax(axis=1) != Q_prev.argmax(axis=1))
