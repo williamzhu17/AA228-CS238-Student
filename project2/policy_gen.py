@@ -51,7 +51,7 @@ def generate_policy_file(Q, filename):
             file.write(f"{policy[row]}\n")
 
 def missing_pair_neighbors(transitions, num_states, num_actions):
-    # Mark pairs that have actual transition samples.
+    # Mark pairs that have actual transition samples
     observed = np.zeros((num_states, num_actions), dtype=bool)
 
     for s, a in transitions:
@@ -66,7 +66,7 @@ def missing_pair_neighbors(transitions, num_states, num_actions):
     neighbors = []
 
     for a in range(num_actions):
-        # Ue states with samples for this action as neighbors
+        # Use states with samples for this action as neighbors
         sources = np.flatnonzero(observed[:, a])
 
         if len(sources) == 0:
@@ -74,7 +74,8 @@ def missing_pair_neighbors(transitions, num_states, num_actions):
 
         for row in np.flatnonzero(~observed[:, a]):
             distances = ((positions[sources] - positions[row]) ** 2 + (velocities[sources] - velocities[row]) ** 2)
-            nearest = sources[distances.argmin()]
+            k = min(3, len(sources))
+            nearest = sources[np.argpartition(distances, k - 1)[:k]]
             neighbors.append((row, a, nearest))
 
     return neighbors
@@ -105,8 +106,8 @@ def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations
 
             Q_new[s - 1, a - 1] = summation / len(samples)
 
-        for row, a, source in neighbors:
-            Q_new[row, a] = Q_new[source, a]
+        for row, a, sources in neighbors:
+            Q_new[row, a] = Q_new[sources, a].mean()
 
         change = np.max(np.abs(Q_new - Q_prev))
         policy_changes = np.count_nonzero(Q_new.argmax(axis=1) != Q_prev.argmax(axis=1))
