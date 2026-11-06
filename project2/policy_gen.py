@@ -4,6 +4,7 @@ import numpy as np
 
 from collections import defaultdict
 from pathlib import Path
+from time import perf_counter
 
 DATASET = None
 
@@ -185,4 +186,6 @@ def main():
     generate_policy_file(Q, policy_path)
 
 if __name__ == "__main__":
+    start_time = perf_counter()
     main()
+    print(f"Total runtime: {perf_counter() - start_time:.2f} seconds")
