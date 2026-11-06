@@ -5,6 +5,8 @@ import numpy as np
 from collections import defaultdict
 from pathlib import Path
 
+DATASET = None
+
 CONFIG = {
     "small": {"num_states": 100, "num_actions": 4, "gamma": 0.95},
     "medium": {"num_states": 50000, "num_actions": 7, "gamma": 1.0},
@@ -48,7 +50,11 @@ def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations
 
             for sample in samples:
                 r, sp = sample
-                summation += r + gamma * next_values[sp - 1]
+
+                if DATASET == "medium" and r > 0:
+                    summation += r
+                else:
+                    summation += r + gamma * next_values[sp - 1]
 
             Q_new[s - 1, a - 1] = summation / len(samples)
 
@@ -65,17 +71,20 @@ def q_iteration(transitions, num_states, num_actions, gamma=0.95, max_iterations
     return Q_prev
 
 def main():
+    global DATASET
+
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset", choices=CONFIG)
     args = parser.parse_args()
+    DATASET = args.dataset
 
     project_dir = Path(__file__).resolve().parent
-    csv_path = project_dir / "data" / f"{args.dataset}.csv"
-    policy_path = project_dir / f"{args.dataset}.policy"
+    csv_path = project_dir / "data" / f"{DATASET}.csv"
+    policy_path = project_dir / f"{DATASET}.policy"
 
     transitions = read_transitions(csv_path)
 
-    Q = q_iteration(transitions, **CONFIG[args.dataset])
+    Q = q_iteration(transitions, **CONFIG[DATASET])
 
     generate_policy_file(Q, policy_path)
 
