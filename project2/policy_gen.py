@@ -1,13 +1,18 @@
 import argparse
 import csv
+import numpy as np
 
 from collections import defaultdict
 from pathlib import Path
 
+CONFIG = {
+    "small": {"num_states": 100, "num_actions": 4, "gamma": 0.95},
+    "medium": {"num_states": 50000, "num_actions": 7, "gamma": 1.0},
+    "large": {"num_states": 302020, "num_actions": 9, "gamma": 0.95},
+}
+
 def read_transitions(csv_path):
     transitions = defaultdict(list)
-    states = set()
-    actions = set()
 
     with open(csv_path) as file:
         reader = csv.DictReader(file)
@@ -19,41 +24,29 @@ def read_transitions(csv_path):
             sp = int(row["sp"])
 
             transitions[(s, a)].append((r, sp))
-            states.update([s, sp])
-            actions.add(a)
 
-    return dict(transitions), states, actions
+    return dict(transitions)
 
-def generate_policy_file(Q, filename, states):
+def generate_policy_file(Q, filename):
     with open(filename, "w") as file:
-        for state in states:
-            if state not in Q:
-                raise ValueError("state not in Q")
-
-            action_values = Q[state]
-            action = max(sorted(action_values), key=action_values.get)
+        for action in Q.argmax(axis=1) + 1:
             file.write(f"{action}\n")
 
-def q_iteration(transitions, states, actions, gamma=0.95, iterations=10):
-    Q_prev = {
-        state: {
-            action: 0.0 for action in actions
-        } for state in states
-    }
+def q_iteration(transitions, num_states, num_actions, gamma=0.95, iterations=10):
+    Q_prev = np.zeros((num_states, num_actions))
 
     for _ in range(iterations):
-        Q_new = {
-            state: values.copy() for state, values in Q_prev.items()
-        }
+        Q_new = Q_prev.copy()
+        next_values = Q_prev.max(axis=1)
 
         for (s, a), samples in transitions.items():
             summation = 0
 
             for sample in samples:
                 r, sp = sample
-                summation += r + gamma * max(Q_prev[sp].values())
+                summation += r + gamma * next_values[sp - 1]
 
-            Q_new[s][a] = summation / len(samples)
+            Q_new[s - 1, a - 1] = summation / len(samples)
 
         Q_prev = Q_new
 
@@ -61,19 +54,18 @@ def q_iteration(transitions, states, actions, gamma=0.95, iterations=10):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("dataset", choices=["small", "medium", "large"])
+    parser.add_argument("dataset", choices=CONFIG)
     args = parser.parse_args()
 
     project_dir = Path(__file__).resolve().parent
     csv_path = project_dir / "data" / f"{args.dataset}.csv"
     policy_path = project_dir / f"{args.dataset}.policy"
 
-    transitions, states, actions = read_transitions(csv_path)
+    transitions = read_transitions(csv_path)
 
-    Q = q_iteration(transitions, states, actions)
+    Q = q_iteration(transitions, **CONFIG[args.dataset])
 
-    generate_policy_file(Q, policy_path, len(states))
-
+    generate_policy_file(Q, policy_path)
 
 if __name__ == "__main__":
     main()
